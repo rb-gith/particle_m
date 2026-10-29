@@ -84,6 +84,4 @@ Library versions are pinned in both `index.html` and `sw.js`; change them in bot
 - **Layer 3:** 2 tiles (peak)
 - **Total:** 60 tiles / 30 pairs
 
-## License
 
-MIT — see [LICENSE](LICENSE).
