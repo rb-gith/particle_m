@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>⚛ Particle Mahjong</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#020510;font-family:"Courier New",monospace;overflow-x:hidden}
+  button{outline:none;}
+  button:hover{opacity:0.8;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useRef,useCallback}=React;
+const TW=50,TH=64,GAP=3,LDX=8,LDY=8,MZ=3;
+const TYPES=[
+  {sym:'γ', name:'Photon',   col:'#FFE066'},
+  {sym:'e⁻',name:'Electron', col:'#4FC3F7'},
+  {sym:'e⁺',name:'Positron', col:'#FF6B6B'},
+  {sym:'μ', name:'Muon',     col:'#81C784'},
+  {sym:'τ', name:'Tau',      col:'#CE93D8'},
+  {sym:'ν', name:'Neutrino', col:'#80DEEA'},
+  {sym:'u', name:'Up',       col:'#FFAB91'},
+  {sym:'d', name:'Down',     col:'#4DD0E1'},
+  {sym:'s', name:'Strange',  col:'#B0BEC5'},
+  {sym:'c', name:'Charm',    col:'#FFF176'},
+  {sym:'p', name:'Proton',   col:'#EF9A9A'},
+  {sym:'n', name:'Neutron',  col:'#90A4AE'},
+  {sym:'H', name:'Higgs',    col:'#F48FB1'},
+  {sym:'W', name:'W Boson',  col:'#A5D6A7'},
+  {sym:'Z', name:'Z Boson',  col:'#B39DDB'},
+];
+const buildLayout=()=>{
+  const p=[];
+  for(let y=0;y<4;y++) for(let x=0;x<8;x++) p.push([x,y,0]);
+  for(let y=0;y<3;y++) for(let x=1;x<7;x++) p.push([x,y,1]);
+  for(let y=0;y<2;y++) for(let x=2;x<6;x++) p.push([x,y,2]);
+  p.push([3,0,3],[4,0,3]);
+  return p;
+};
+const rng=a=>{const b=[...a];for(let i=b.length-1;i>0;i--){const j=0|Math.random()*(i+1);[b[i],b[j]]=[b[j],b[i]];}return b;};
+const mkTiles=()=>{
+  const ids=rng([...Array(15)].flatMap((_,i)=>[i,i,i,i]));
+  return buildLayout().map(([x,y,z],i)=>({id:i,x,y,z,t:ids[i],gone:false}));
+};
+const isFree=(tile,tiles)=>{
+  if(tile.gone)return false;
+  const live=tiles.filter(t=>!t.gone&&t.id!==tile.id);
+  if(live.some(t=>t.z===tile.z+1&&t.x===tile.x&&t.y===tile.y))return false;
+  return !(live.some(t=>t.z===tile.z&&t.x===tile.x-1&&t.y===tile.y)&&
+           live.some(t=>t.z===tile.z&&t.x===tile.x+1&&t.y===tile.y));
+};
+const WB=8*(TW+GAP)+MZ*LDX+TW+8;
+const HB=4*(TH+GAP)+MZ*LDY+TH+8;
+const CORNERS=[{top:3,left:3},{top:3,right:3},{bottom:3,left:3},{bottom:3,right:3}];
+
+function App(){
+  const[tiles,setTiles]=useState(mkTiles);
+  const[sel,setSel]=useState(null);
+  const[score,setScore]=useState(0);
+  const[hint,setHint]=useState(null);
+  const[msg,setMsg]=useState('');
+  const tmr=useRef(null);
+  const alive=tiles.filter(t=>!t.gone);
+  const free=alive.filter(t=>isFree(t,tiles));
+  const matched=(60-alive.length)/2;
+  const gameWon=alive.length===0;
+  const gameStuck=!gameWon&&!free.some((a,_,arr)=>arr.some(b=>b.id!==a.id&&b.t===a.t));
+  const flash=useCallback(text=>{
+    setMsg(text);clearTimeout(tmr.current);
+    tmr.current=setTimeout(()=>setMsg(''),1800);
+  },[]);
+  const click=useCallback(tile=>{
+    if(!isFree(tile,tiles))return;
+    setHint(null);
+    if(sel===null){setSel(tile.id);return;}
+    if(sel===tile.id){setSel(null);return;}
+    const s=tiles.find(t=>t.id===sel);
+    if(s?.t===tile.t){
+      setTiles(p=>p.map(t=>t.id===tile.id||t.id===sel?{...t,gone:true}:t));
+      setScore(sc=>sc+20);setSel(null);flash('⚛ ANNIHILATION! +20');
+    }else{setSel(tile.id);flash('✕ NO MATCH');}
+  },[tiles,sel,flash]);
+  const doHint=()=>{
+    for(let i=0;i<free.length;i++)for(let j=i+1;j<free.length;j++)
+      if(free[i].t===free[j].t){setHint([free[i].id,free[j].id]);setScore(s=>Math.max(0,s-5));return;}
+  };
+  const doReshuffle=()=>{
+    const rem=tiles.filter(t=>!t.gone);const st=rng(rem.map(t=>t.t));let i=0;
+    setTiles(p=>p.map(t=>t.gone?t:{...t,t:st[i++]}));
+    setSel(null);setHint(null);setScore(s=>Math.max(0,s-20));flash('⚡ RESHUFFLED −20');
+  };
+  const doRestart=()=>{setTiles(mkTiles());setSel(null);setScore(0);setHint(null);setMsg('');};
+  const stars=useRef([...Array(90)].map(()=>({
+    x:Math.random()*100,y:Math.random()*100,s:Math.random()*1.4+0.4,o:Math.random()*0.45+0.15
+  })));
+  const F={fontFamily:'"Courier New",monospace'};
+  return(
+    <div style={{...F,minHeight:'100vh',background:'#020510',display:'flex',flexDirection:'column',alignItems:'center',padding:'14px 8px',userSelect:'none',position:'relative',overflow:'hidden'}}>
+      <div style={{position:'fixed',inset:0,pointerEvents:'none',zIndex:999,backgroundImage:'repeating-linear-gradient(0deg,rgba(0,0,0,0.05),rgba(0,0,0,0.05) 1px,transparent 1px,transparent 3px)'}}/>
+      <div style={{position:'fixed',inset:0,pointerEvents:'none'}}>
+        {stars.current.map((s,i)=>(
+          <div key={i} style={{position:'absolute',left:`${s.x}%`,top:`${s.y}%`,width:s.s,height:s.s,borderRadius:'50%',background:'#fff',opacity:s.o}}/>
+        ))}
+      </div>
+      <div style={{position:'relative',color:'#00FFAA',fontSize:20,letterSpacing:6,textShadow:'0 0 18px #00FFAA88',marginBottom:2}}>
+        ⚛ PARTICLE MAHJONG
+      </div>
+      <div style={{position:'relative',color:'#1a4a2a',fontSize:9,letterSpacing:3,marginBottom:12}}>
+        MATCH PARTICLE PAIRS · CLEAR THE BOARD
+      </div>
+      <div style={{position:'relative',display:'flex',gap:24,color:'#4a6a5a',fontSize:11,letterSpacing:2,marginBottom:8}}>
+        <span>SCORE: <b style={{color:'#FFE066'}}>{score}</b></span>
+        <span>PAIRS: <b style={{color:'#81C784'}}>{matched}</b><span style={{color:'#1a4a2a'}}>/30</span></span>
+        <span>FREE: <b style={{color:'#4FC3F7'}}>{free.length}</b></span>
+      </div>
+      <div style={{position:'relative',height:20,fontSize:11,letterSpacing:2,marginBottom:8,
+        color:gameWon?'#FFE066':gameStuck?'#FF6B6B':'#66AA88',
+        textShadow:gameWon?'0 0 10px #FFE066':'none',
+        opacity:(gameWon||gameStuck||msg)?1:0,transition:'opacity 0.3s',
+      }}>
+        {gameWon?'✨ QUANTUM VICTORY — ALL PARTICLES ANNIHILATED':gameStuck?'💥 NO FREE PAIRS — RESHUFFLE OR RESTART':msg}
+      </div>
+      <div style={{overflowX:'auto',width:'100%',display:'flex',justifyContent:'center'}}>
+        <div style={{position:'relative',width:WB,height:HB,marginBottom:14,flexShrink:0}}>
+          {tiles.filter(t=>!t.gone)
+            .sort((a,b)=>a.z!==b.z?a.z-b.z:a.y!==b.y?a.y-b.y:a.x-b.x)
+            .map(tile=>{
+              const tp=TYPES[tile.t];
+              const fr=isFree(tile,tiles);
+              const isSel=tile.id===sel;
+              const isHint=hint?.includes(tile.id);
+              const sx=tile.x*(TW+GAP)+tile.z*LDX;
+              const sy=tile.y*(TH+GAP)-tile.z*LDY+MZ*LDY;
+              const zi=tile.z*200+tile.y*10+(8-tile.x);
+              return(
+                <div key={tile.id} onClick={()=>click(tile)} style={{
+                  position:'absolute',left:sx,top:sy,width:TW,height:TH,
+                  zIndex:zi,cursor:fr?'pointer':'default',
+                  transform:isSel?'translateY(-6px)':'none',transition:'transform 0.08s',
+                }}>
+                  <div style={{
+                    position:'absolute',inset:0,borderRadius:2,
+                    background:fr?'linear-gradient(150deg,#1e1e40 0%,#0d0d24 100%)':'#070718',
+                    border:isSel?`2px solid ${tp.col}`:isHint?'2px solid #FFE066':fr?`1px solid ${tp.col}44`:'1px solid #0d0d22',
+                    boxShadow:isSel
+                      ?`0 0 14px ${tp.col},0 0 28px ${tp.col}44,5px 5px 0 #01010a`
+                      :isHint
+                      ?`0 0 14px #FFE066,0 0 28px #FFE06644,5px 5px 0 #01010a`
+                      :fr
+                      ?`0 0 3px ${tp.col}22,5px 5px 0 #01010a`
+                      :'4px 4px 0 #01010a',
+                    display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+                  }}>
+                    {CORNERS.map((c,i)=>(
+                      <div key={i} style={{position:'absolute',...c,width:4,height:4,background:tp.col,opacity:fr?0.65:0.1}}/>
+                    ))}
+                    <div style={{position:'absolute',top:11,left:7,right:7,height:1,background:tp.col,opacity:fr?0.18:0.04}}/>
+                    <div style={{position:'absolute',bottom:11,left:7,right:7,height:1,background:tp.col,opacity:fr?0.18:0.04}}/>
+                    <div style={{fontSize:20,fontWeight:900,lineHeight:1,
+                      color:fr?tp.col:`${tp.col}2a`,
+                      textShadow:fr?`0 0 10px ${tp.col},0 0 20px ${tp.col}66`:'none',
+                    }}>{tp.sym}</div>
+                    <div style={{fontSize:6,marginTop:5,letterSpacing:0.5,textTransform:'uppercase',
+                      color:fr?`${tp.col}80`:`${tp.col}1a`,
+                    }}>{tp.name}</div>
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+      </div>
+      <div style={{position:'relative',display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center'}}>
+        {[
+          {l:'HINT (−5)',fn:doHint,c:'#4FC3F7',d:gameWon||gameStuck||free.length<2},
+          {l:'RESHUFFLE (−20)',fn:doReshuffle,c:'#FFAB91',d:gameWon},
+          {l:'NEW GAME',fn:doRestart,c:'#FF6B6B',d:false},
+        ].map(b=>(
+          <button key={b.l} onClick={b.fn} disabled={b.d} style={{
+            fontFamily:'"Courier New",monospace',background:'transparent',
+            border:`1px solid ${b.d?'#181820':b.c}`,color:b.d?'#222':b.c,
+            fontSize:9,letterSpacing:1,padding:'7px 11px',cursor:b.d?'default':'pointer',
+            textShadow:b.d?'none':`0 0 8px ${b.c}44`,
+          }}>{b.l}</button>
+        ))}
+      </div>
+      <div style={{position:'relative',marginTop:16,display:'flex',flexWrap:'wrap',gap:'5px 14px',justifyContent:'center',maxWidth:480,opacity:0.4}}>
+        {TYPES.map((t,i)=>(
+          <span key={i} style={{fontFamily:'"Courier New",monospace',color:t.col,fontSize:9,letterSpacing:1}}>
+            {t.sym} <span style={{color:'#1a4a2a'}}>{t.name}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
