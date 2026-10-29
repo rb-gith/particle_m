@@ -3,13 +3,18 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="theme-color" content="#020510"/>
 <title>⚛ Particle Mahjong</title>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link rel="manifest" href="manifest.webmanifest"/>
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml"/>
+<link rel="apple-touch-icon" href="icons/icon-192.png"/>
+<!-- Exact versions: keep in sync with the CDN list in sw.js -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:#020510;font-family:"Courier New",monospace;overflow-x:hidden}
+  body{background:#020510;font-family:"Courier New",monospace;overflow-x:hidden;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
   button{outline:none;}
   button:hover{opacity:0.8;}
 </style>
@@ -17,7 +22,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useRef,useCallback}=React;
+const {useState,useRef,useCallback,useEffect}=React;
 const TW=50,TH=64,GAP=3,LDX=8,LDY=8,MZ=3;
 const TYPES=[
   {sym:'γ', name:'Photon',   col:'#FFE066'},
@@ -59,6 +64,8 @@ const isFree=(tile,tiles)=>{
 const WB=8*(TW+GAP)+MZ*LDX+TW+8;
 const HB=4*(TH+GAP)+MZ*LDY+TH+8;
 const CORNERS=[{top:3,left:3},{top:3,right:3},{bottom:3,left:3},{bottom:3,right:3}];
+// Shrink the board to fit narrow (phone) screens; 16px = page side padding
+const fitScale=()=>Math.min(1,(window.innerWidth-16)/WB);
 
 function App(){
   const[tiles,setTiles]=useState(mkTiles);
@@ -66,7 +73,13 @@ function App(){
   const[score,setScore]=useState(0);
   const[hint,setHint]=useState(null);
   const[msg,setMsg]=useState('');
+  const[scale,setScale]=useState(fitScale);
   const tmr=useRef(null);
+  useEffect(()=>{
+    const onResize=()=>setScale(fitScale());
+    window.addEventListener('resize',onResize);
+    return()=>window.removeEventListener('resize',onResize);
+  },[]);
   const alive=tiles.filter(t=>!t.gone);
   const free=alive.filter(t=>isFree(t,tiles));
   const matched=(60-alive.length)/2;
@@ -127,8 +140,8 @@ function App(){
       }}>
         {gameWon?'✨ QUANTUM VICTORY — ALL PARTICLES ANNIHILATED':gameStuck?'💥 NO FREE PAIRS — RESHUFFLE OR RESTART':msg}
       </div>
-      <div style={{overflowX:'auto',width:'100%',display:'flex',justifyContent:'center'}}>
-        <div style={{position:'relative',width:WB,height:HB,marginBottom:14,flexShrink:0}}>
+      <div style={{width:WB*scale,height:HB*scale,marginBottom:14,flexShrink:0}}>
+        <div style={{position:'relative',width:WB,height:HB,transform:`scale(${scale})`,transformOrigin:'0 0'}}>
           {tiles.filter(t=>!t.gone)
             .sort((a,b)=>a.z!==b.z?a.z-b.z:a.y!==b.y?a.y-b.y:a.x-b.x)
             .map(tile=>{
@@ -201,6 +214,12 @@ function App(){
   );
 }
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+<script>
+  // Offline support + "Install app" on Android (needs https or localhost; skipped when opened as a file)
+  if('serviceWorker' in navigator&&location.protocol!=='file:'){
+    addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+  }
 </script>
 </body>
 </html>
