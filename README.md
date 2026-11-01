@@ -116,4 +116,4 @@ Layouts are defined in `LAYOUTS` in `index.html` as `[x, y, z]` positions in hal
 
 ## Credits
 
-Made by gionzana.
+Made by gionzana. If you enjoy the game, you can [buy me a coffee](https://buymeacoffee.com/gionzana) ☕

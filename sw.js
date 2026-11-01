@@ -1,5 +1,5 @@
 // Bump VERSION whenever any game file changes, so phones download the new version.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = 'particle-mahjong-' + VERSION;
 const ASSETS = [
   './',

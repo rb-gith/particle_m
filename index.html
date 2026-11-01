@@ -431,7 +431,11 @@ function App(){
       {screen==='scores'&&<Scores lb={lb} highlight={highlight} onBack={()=>setScreen('menu')}/>}
       {screen==='game'&&<Game key={gameKey} B={boardById(layout)} lb={lb} onSaveScore={saveScore}
         onMenu={()=>setScreen('menu')} onScores={()=>setScreen('scores')} onRestart={()=>play(layout)}/>}
-      <div style={{marginTop:'auto',paddingTop:24,color:C.dim,fontSize:11,letterSpacing:2}}>made by gionzana</div>
+      <div style={{marginTop:'auto',paddingTop:24,display:'flex',flexDirection:'column',alignItems:'center',gap:10,fontSize:11,letterSpacing:2}}>
+        <a href="https://buymeacoffee.com/gionzana" target="_blank" rel="noopener" style={{color:C.yellow,textDecoration:'none',
+          border:`1.5px solid ${C.yellow}`,padding:'7px 12px',textShadow:`0 0 8px ${C.yellow}66`,boxShadow:`inset 0 0 10px ${C.yellow}22`}}>☕ BUY ME A COFFEE</a>
+        <span style={{color:C.dim}}>made by gionzana</span>
+      </div>
     </div>
   </div>;
 }
