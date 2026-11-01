@@ -15,15 +15,18 @@
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:#020510;font-family:"Courier New",monospace;overflow-x:hidden;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
-  button{outline:none;}
-  button:hover{opacity:0.8;}
+  button{outline:none;font-family:inherit;}
+  button:hover:not(:disabled){opacity:0.85;}
+  @keyframes blink{50%{opacity:0.2}}
+  @keyframes glow{50%{text-shadow:0 0 24px #FFE066,0 0 4px #fff}}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useRef,useCallback,useEffect}=React;
-const TW=50,TH=64,GAP=3,LDX=8,LDY=8,MZ=3;
+const {useState,useRef,useEffect}=React;
+const TW=50,TH=64,GAP=3,LDX=8,LDY=8;
+const C={bg:'#020510',green:'#00FFAA',yellow:'#FFE066',label:'#8fb8a6',sub:'#4fd6a0',dim:'#5f8a78',red:'#FF6B6B',blue:'#4FC3F7'};
 const TYPES=[
   {sym:'γ', name:'Photon',   col:'#FFE066'},
   {sym:'e⁻',name:'Electron', col:'#4FC3F7'},
@@ -41,177 +44,396 @@ const TYPES=[
   {sym:'W', name:'W Boson',  col:'#A5D6A7'},
   {sym:'Z', name:'Z Boson',  col:'#B39DDB'},
 ];
-const buildLayout=()=>{
-  const p=[];
-  for(let y=0;y<4;y++) for(let x=0;x<8;x++) p.push([x,y,0]);
-  for(let y=0;y<3;y++) for(let x=1;x<7;x++) p.push([x,y,1]);
-  for(let y=0;y<2;y++) for(let x=2;x<6;x++) p.push([x,y,2]);
-  p.push([3,0,3],[4,0,3]);
-  return p;
-};
-const rng=a=>{const b=[...a];for(let i=b.length-1;i>0;i--){const j=0|Math.random()*(i+1);[b[i],b[j]]=[b[j],b[i]];}return b;};
-const mkTiles=()=>{
-  const ids=rng([...Array(15)].flatMap((_,i)=>[i,i,i,i]));
-  return buildLayout().map(([x,y,z],i)=>({id:i,x,y,z,t:ids[i],gone:false}));
-};
-const isFree=(tile,tiles)=>{
-  if(tile.gone)return false;
-  const live=tiles.filter(t=>!t.gone&&t.id!==tile.id);
-  if(live.some(t=>t.z===tile.z+1&&t.x===tile.x&&t.y===tile.y))return false;
-  return !(live.some(t=>t.z===tile.z&&t.x===tile.x-1&&t.y===tile.y)&&
-           live.some(t=>t.z===tile.z&&t.x===tile.x+1&&t.y===tile.y));
-};
-const WB=8*(TW+GAP)+MZ*LDX+TW+8;
-const HB=4*(TH+GAP)+MZ*LDY+TH+8;
-const CORNERS=[{top:3,left:3},{top:3,right:3},{bottom:3,left:3},{bottom:3,right:3}];
-// Shrink the board to fit narrow (phone) screens; 16px = page side padding
-const fitScale=()=>Math.min(1,(window.innerWidth-16)/WB);
 
-function App(){
-  const[tiles,setTiles]=useState(mkTiles);
-  const[sel,setSel]=useState(null);
-  const[score,setScore]=useState(0);
-  const[hint,setHint]=useState(null);
-  const[msg,setMsg]=useState('');
-  const[scale,setScale]=useState(fitScale);
-  const tmr=useRef(null);
+/* ---------- Layouts ----------
+   Positions are [x, y, z] in half-tile units: a tile covers 2×2 units, so an
+   odd coordinate sits half a tile off the grid (like classic Mahjong boards). */
+const rect=(x0,y0,cols,rows,z)=>{const p=[];for(let j=0;j<rows;j++)for(let i=0;i<cols;i++)p.push([x0+2*i,y0+2*j,z]);return p;};
+const LAYOUTS=[
+  {id:'flat',name:'FLAT',desc:'QUICK WARM-UP',pos:[...rect(0,0,6,4,0),...rect(2,1,4,3,1)]},
+  {id:'pyramid',name:'PYRAMID',desc:'THE ORIGINAL',pos:[...rect(0,0,8,4,0),...rect(2,0,6,3,1),...rect(4,0,4,2,2),...rect(6,0,2,1,3)]},
+  {id:'bridge',name:'BRIDGE',desc:'TWO TOWERS',pos:[
+    ...rect(0,0,2,4,0),...rect(16,0,2,4,0),...rect(4,2,6,2,0),
+    ...rect(0,0,2,4,1),...rect(16,0,2,4,1),...rect(4,3,6,1,1),
+    ...rect(1,1,1,3,2),...rect(17,1,1,3,2),[1,3,3],[17,3,3]]},
+  {id:'atom',name:'ATOM',desc:'STACKED CORE',pos:[
+    ...rect(0,4,10,2,0),...rect(8,0,2,2,0),...rect(8,8,2,2,0),[2,0,0],[16,0,0],[2,10,0],[16,10,0],
+    ...rect(2,4,8,2,1),...rect(8,2,2,1,1),...rect(8,8,2,1,1),
+    ...rect(6,4,4,2,2),...rect(8,4,2,2,3)]},
+  {id:'fortress',name:'FORTRESS',desc:'THE LONG GAME',pos:[
+    ...rect(0,0,10,1,0),...rect(4,2,6,1,0),...rect(2,4,8,1,0),...rect(0,6,10,1,0),
+    ...rect(2,8,8,1,0),...rect(4,10,6,1,0),...rect(0,12,10,1,0),
+    ...rect(6,3,4,4,1),...rect(8,4,2,3,2),...rect(8,5,2,2,3)]},
+];
+const SEC_PER_PAIR=8; // par time; finishing faster earns a time bonus
+
+/* Precompute, for every position, which positions cover it and which touch its left/right side. */
+const prep=L=>{
+  const pos=L.pos.map(([x,y,z])=>({x,y,z}));
+  const n=pos.map(()=>({above:[],left:[],right:[]}));
+  pos.forEach((a,i)=>pos.forEach((b,j)=>{
+    if(i===j)return;
+    const dx=b.x-a.x,dy=Math.abs(b.y-a.y);
+    if(b.z===a.z+1&&Math.abs(dx)<2&&dy<2)n[i].above.push(j);
+    if(b.z===a.z&&dy<2){if(dx===-2)n[i].left.push(j);if(dx===2)n[i].right.push(j);}
+  }));
+  const maxX=Math.max(...pos.map(p=>p.x)),maxY=Math.max(...pos.map(p=>p.y)),maxZ=Math.max(...pos.map(p=>p.z));
+  const W=(maxX/2+1)*(TW+GAP)-GAP+maxZ*LDX+8;
+  const H=(maxY/2+1)*(TH+GAP)-GAP+maxZ*LDY+8;
+  const pairs=pos.length/2;
+  return {...L,pos,n,W,H,maxZ,pairs,par:pairs*SEC_PER_PAIR};
+};
+const BOARDS=LAYOUTS.map(prep);
+const boardById=id=>BOARDS.find(b=>b.id===id);
+const screenXY=(B,p)=>[p.x/2*(TW+GAP)+p.z*LDX, p.y/2*(TH+GAP)-p.z*LDY+B.maxZ*LDY];
+const drawOrder=(B,ids)=>ids.slice().sort((a,b)=>{const p=B.pos[a],q=B.pos[b];return p.z!==q.z?p.z-q.z:p.y!==q.y?p.y-q.y:q.x-p.x;});
+
+const shuffle=a=>{const b=[...a];for(let i=b.length-1;i>0;i--){const j=0|Math.random()*(i+1);[b[i],b[j]]=[b[j],b[i]];}return b;};
+const freeIn=(B,i,alive)=>{const nb=B.n[i];return !nb.above.some(alive)&&!(nb.left.some(alive)&&nb.right.some(alive));};
+
+/* Solvable deal: remove two free positions at a time from the full board and give them a
+   matching pair. Playing the removals in the same order clears the board, so a solution exists. */
+const dealPairs=(B,ids,pairTypes)=>{
+  for(let tries=0;tries<400;tries++){
+    const left=new Set(ids),alive=j=>left.has(j),types=shuffle(pairTypes),t={};
+    let k=0,ok=true;
+    while(left.size){
+      const fr=shuffle([...left].filter(i=>freeIn(B,i,alive)));
+      if(fr.length<2){ok=false;break;}
+      left.delete(fr[0]);left.delete(fr[1]);
+      t[fr[0]]=t[fr[1]]=types[k++];
+    }
+    if(ok)return t;
+  }
+  return null;
+};
+const newTiles=B=>{
+  const order=shuffle([...TYPES.keys()]);
+  const pairTypes=[...Array(B.pairs)].map((_,i)=>order[i%TYPES.length]);
+  let t=dealPairs(B,B.pos.map((_,i)=>i),pairTypes);
+  if(!t){const flat=shuffle(pairTypes.flatMap(x=>[x,x]));t={};flat.forEach((x,i)=>{t[i]=x;});}
+  return B.pos.map((_,i)=>({id:i,t:t[i],gone:false}));
+};
+
+/* ---------- Leaderboard (top 3 per layout, stored on this device) ---------- */
+const LB_KEY='pm-scores-v1',NAME_KEY='pm-initials',ABC='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const loadLB=()=>{try{return JSON.parse(localStorage.getItem(LB_KEY))||{};}catch(e){return {};}};
+const saveLB=lb=>{try{localStorage.setItem(LB_KEY,JSON.stringify(lb));}catch(e){}};
+const rankOrder=(a,b)=>a.score!==b.score?b.score-a.score:a.time-b.time; // higher score first, then faster
+const qualifies=(list,entry)=>list.length<3||rankOrder(entry,list[list.length-1])<0;
+const fmtTime=s=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+const RANKS=[{l:'1ST',c:'#FFE066'},{l:'2ND',c:'#CFD8DC'},{l:'3RD',c:'#FFAB91'}];
+
+/* ---------- Shared bits ---------- */
+function Btn({label,onClick,color=C.green,disabled=false,big=false}){
+  return <button onClick={onClick} disabled={disabled} style={{
+    background:'transparent',border:`1.5px solid ${disabled?'#2c2c3c':color}`,color:disabled?'#4a4a5c':color,
+    fontSize:big?14:11,letterSpacing:1.5,padding:big?'11px 18px':'9px 12px',cursor:disabled?'default':'pointer',
+    textShadow:disabled?'none':`0 0 8px ${color}66`,boxShadow:disabled?'none':`inset 0 0 10px ${color}22`,
+  }}>{label}</button>;
+}
+
+function Leaderboard({list=[],highlight}){
+  return <div style={{width:'100%',maxWidth:340}}>
+    {RANKS.map((r,i)=>{
+      const e=list[i],hi=e&&e.id===highlight;
+      return <div key={i} style={{display:'grid',gridTemplateColumns:'42px 50px 1fr 62px',alignItems:'center',gap:6,
+        padding:'7px 8px',marginBottom:4,fontSize:13,letterSpacing:1,
+        border:`1px solid ${hi?C.yellow:'#1c2c3c'}`,background:hi?'#2a2a0a':'#08101c',
+        animation:hi?'blink 1s steps(2) 3':'none'}}>
+        <span style={{color:r.c,fontWeight:'bold'}}>{r.l}</span>
+        <span style={{color:e?'#fff':C.dim,fontWeight:'bold',letterSpacing:3}}>{e?e.name:'---'}</span>
+        <span style={{color:e?C.yellow:C.dim,textAlign:'right'}}>{e?e.score:'-'}</span>
+        <span style={{color:e?C.label:C.dim,textAlign:'right'}}>{e?fmtTime(e.time):'--:--'}</span>
+      </div>;
+    })}
+  </div>;
+}
+
+function Preview({B}){
+  const shades=['#1d4a6e','#2a6f9e','#3b95c8','#62bde8','#9be2ff'];
+  return <svg viewBox={`0 0 ${B.W} ${B.H}`} style={{width:'100%',height:70,display:'block'}}>
+    {drawOrder(B,B.pos.map((_,i)=>i)).map(i=>{const [x,y]=screenXY(B,B.pos[i]);
+      return <rect key={i} x={x} y={y} width={TW} height={TH} rx={4} fill={shades[B.pos[i].z]} stroke="#020510" strokeWidth={3}/>;})}
+  </svg>;
+}
+
+/* ---------- Arcade initials entry ---------- */
+function NameEntry({onDone}){
+  const [ch,setCh]=useState(()=>{try{const s=localStorage.getItem(NAME_KEY);if(/^[A-Z]{3}$/.test(s||''))return s.split('');}catch(e){}return ['A','A','A'];});
+  const [pos,setPos]=useState(0);
+  const step=(i,d)=>{setPos(i);setCh(c=>c.map((x,k)=>k===i?ABC[(ABC.indexOf(x)+d+26)%26]:x));};
+  const done=()=>{const n=ch.join('');try{localStorage.setItem(NAME_KEY,n);}catch(e){}onDone(n);};
   useEffect(()=>{
-    const onResize=()=>setScale(fitScale());
-    window.addEventListener('resize',onResize);
-    return()=>window.removeEventListener('resize',onResize);
+    const onKey=e=>{
+      if(/^[a-z]$/i.test(e.key)){const L=e.key.toUpperCase();setCh(c=>c.map((x,k)=>k===pos?L:x));setPos(p=>Math.min(2,p+1));}
+      else if(e.key==='ArrowUp')step(pos,1);
+      else if(e.key==='ArrowDown')step(pos,-1);
+      else if(e.key==='ArrowLeft'||e.key==='Backspace')setPos(p=>Math.max(0,p-1));
+      else if(e.key==='ArrowRight')setPos(p=>Math.min(2,p+1));
+      else if(e.key==='Enter')done();
+      else return;
+      e.preventDefault();
+    };
+    addEventListener('keydown',onKey);
+    return()=>removeEventListener('keydown',onKey);
+  },[pos,ch]);
+  const arrow={background:'transparent',border:`1.5px solid ${C.blue}`,color:C.blue,width:52,height:36,fontSize:16,cursor:'pointer'};
+  return <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:12}}>
+    <div style={{color:C.yellow,fontSize:15,letterSpacing:3,animation:'glow 1.2s infinite'}}>NEW HIGH SCORE!</div>
+    <div style={{color:C.label,fontSize:12,letterSpacing:2}}>ENTER YOUR INITIALS</div>
+    <div style={{display:'flex',gap:14}}>
+      {ch.map((x,i)=><div key={i} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6}}>
+        <button aria-label={`Letter ${i+1} up`} style={arrow} onClick={()=>step(i,1)}>▲</button>
+        <div onClick={()=>setPos(i)} style={{width:52,height:60,display:'grid',placeItems:'center',cursor:'pointer',
+          fontSize:42,fontWeight:'bold',color:'#fff',textShadow:`0 0 12px ${C.yellow}`,
+          borderBottom:`3px solid ${i===pos?C.yellow:'#2c3c4c'}`,animation:i===pos?'blink 0.8s steps(2) infinite':'none'}}>{x}</div>
+        <button aria-label={`Letter ${i+1} down`} style={arrow} onClick={()=>step(i,-1)}>▼</button>
+      </div>)}
+    </div>
+    <Btn label="► ENTER" onClick={done} color={C.yellow} big/>
+  </div>;
+}
+
+/* ---------- Menu ---------- */
+function Menu({lb,onPlay,onScores}){
+  return <div style={{width:'100%',maxWidth:520,display:'flex',flexDirection:'column',alignItems:'center'}}>
+    <div style={{color:C.label,fontSize:12,letterSpacing:4,margin:'6px 0 12px'}}>SELECT LAYOUT</div>
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:10,width:'100%'}}>
+      {BOARDS.map(B=>{const best=(lb[B.id]||[])[0];
+        return <button key={B.id} onClick={()=>onPlay(B.id)} style={{background:'#07101e',border:'1.5px solid #1f4a5a',
+          padding:10,cursor:'pointer',textAlign:'left',color:'#fff',display:'flex',flexDirection:'column',gap:6}}>
+          <Preview B={B}/>
+          <div style={{color:C.green,fontSize:15,letterSpacing:3,textShadow:`0 0 10px ${C.green}66`}}>{B.name}</div>
+          <div style={{color:C.label,fontSize:10,letterSpacing:1}}>{B.desc}</div>
+          <div style={{color:C.label,fontSize:10,letterSpacing:1}}>{B.pos.length} TILES · PAR {fmtTime(B.par)}</div>
+          <div style={{fontSize:11,letterSpacing:1,color:best?C.yellow:C.dim}}>{best?`★ ${best.name} ${best.score}`:'NO SCORE YET'}</div>
+        </button>;})}
+    </div>
+    <div style={{marginTop:16}}><Btn label="★ HIGH SCORES" onClick={onScores} color={C.yellow}/></div>
+    <div style={{marginTop:16,color:C.dim,fontSize:10,letterSpacing:1,lineHeight:1.7,textAlign:'center',maxWidth:340}}>
+      MATCH TWO FREE TILES OF THE SAME PARTICLE.<br/>FAST CHAINS AND QUICK FINISHES SCORE MORE.
+    </div>
+  </div>;
+}
+
+function Scores({lb,highlight,onBack}){
+  return <div style={{width:'100%',maxWidth:360,display:'flex',flexDirection:'column',alignItems:'center',gap:14}}>
+    <div style={{color:C.yellow,fontSize:14,letterSpacing:4,textShadow:`0 0 12px ${C.yellow}88`}}>★ HIGH SCORES ★</div>
+    {BOARDS.map(B=><div key={B.id} style={{width:'100%',display:'flex',flexDirection:'column',alignItems:'center',gap:6}}>
+      <div style={{color:C.green,fontSize:12,letterSpacing:3,alignSelf:'flex-start'}}>{B.name}</div>
+      <Leaderboard list={lb[B.id]} highlight={highlight}/>
+    </div>)}
+    <Btn label="◄ MENU" onClick={onBack}/>
+  </div>;
+}
+
+/* ---------- Game ---------- */
+function Tile({B,tile,free,sel,hint,onClick}){
+  const tp=TYPES[tile.t],p=B.pos[tile.id],[sx,sy]=screenXY(B,p),col=tp.col;
+  const faces=['#22224a','#292956','#303062','#38386e','#40407a'];
+  const ring=sel?`2.5px solid ${col}`:hint?`2.5px solid ${C.yellow}`:free?`1.5px solid ${col}cc`:`1px solid ${col}38`;
+  const edge='3px 3px 0 #2a2a55,5px 5px 0 #000';
+  const shadow=sel?`0 0 14px ${col},0 0 28px ${col}55,${edge}`:hint?`0 0 14px ${C.yellow},0 0 28px ${C.yellow}55,${edge}`
+    :free?`0 0 6px ${col}44,${edge}`:'3px 3px 0 #17172e,5px 5px 0 #000';
+  return <div onClick={onClick} style={{position:'absolute',left:sx,top:sy,width:TW,height:TH,
+    zIndex:p.z*10000+p.y*100+(100-p.x),cursor:free?'pointer':'default',
+    transform:sel?'translateY(-6px)':'none',transition:'transform 0.08s'}}>
+    <div style={{position:'absolute',inset:0,borderRadius:3,border:ring,boxShadow:shadow,
+      background:free?`linear-gradient(150deg,${faces[p.z]} 0%,#121230 100%)`:'#0c0c22',
+      display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
+      {[{top:3,left:3},{top:3,right:3},{bottom:3,left:3},{bottom:3,right:3}].map((c,i)=>
+        <div key={i} style={{position:'absolute',...c,width:4,height:4,background:col,opacity:free?0.9:0.25}}/>)}
+      <div style={{position:'absolute',top:11,left:7,right:7,height:1,background:col,opacity:free?0.45:0.12}}/>
+      <div style={{position:'absolute',bottom:11,left:7,right:7,height:1,background:col,opacity:free?0.45:0.12}}/>
+      <div style={{fontSize:22,fontWeight:900,lineHeight:1,color:free?col:`${col}70`,
+        textShadow:free?`0 0 8px ${col}aa`:'none'}}>{tp.sym}</div>
+      <div style={{fontSize:7,marginTop:5,letterSpacing:0.5,textTransform:'uppercase',color:free?`${col}dd`:`${col}55`}}>{tp.name}</div>
+    </div>
+  </div>;
+}
+
+function Game({B,lb,onSaveScore,onMenu,onScores,onRestart}){
+  const fit=()=>Math.min(1,(window.innerWidth-16)/B.W);
+  const [tiles,setTiles]=useState(()=>newTiles(B));
+  const [sel,setSel]=useState(null);
+  const [hint,setHint]=useState(null);
+  const [msg,setMsg]=useState('');
+  const [pts,setPts]=useState({pairs:0,chains:0,penalty:0});
+  const [paused,setPaused]=useState(false);
+  const [result,setResult]=useState(null);
+  const [savedId,setSavedId]=useState(null);
+  const [scale,setScale]=useState(fit);
+  const [,setTick]=useState(0);
+  const clk=useRef({acc:0,since:null}),started=useRef(false),lastMatch=useRef(null),tmr=useRef(null);
+
+  const elapsed=()=>clk.current.acc+(clk.current.since!=null?performance.now()-clk.current.since:0);
+  const run=()=>{if(clk.current.since==null)clk.current.since=performance.now();};
+  const halt=()=>{const c=clk.current;if(c.since!=null){c.acc+=performance.now()-c.since;c.since=null;}};
+
+  useEffect(()=>{
+    const id=setInterval(()=>{if(clk.current.since!=null)setTick(t=>t+1);},250);
+    const onResize=()=>setScale(fit());
+    const onHide=()=>{if(document.hidden&&clk.current.since!=null){halt();setPaused(true);}};
+    addEventListener('resize',onResize);
+    document.addEventListener('visibilitychange',onHide);
+    return()=>{clearInterval(id);removeEventListener('resize',onResize);document.removeEventListener('visibilitychange',onHide);};
   },[]);
-  const alive=tiles.filter(t=>!t.gone);
-  const free=alive.filter(t=>isFree(t,tiles));
-  const matched=(60-alive.length)/2;
-  const gameWon=alive.length===0;
-  const gameStuck=!gameWon&&!free.some((a,_,arr)=>arr.some(b=>b.id!==a.id&&b.t===a.t));
-  const flash=useCallback(text=>{
-    setMsg(text);clearTimeout(tmr.current);
-    tmr.current=setTimeout(()=>setMsg(''),1800);
-  },[]);
-  const click=useCallback(tile=>{
-    if(!isFree(tile,tiles))return;
+
+  const alive=j=>!tiles[j].gone;
+  const isFree=i=>!tiles[i].gone&&freeIn(B,i,alive);
+  const live=tiles.filter(t=>!t.gone);
+  const free=live.filter(t=>isFree(t.id));
+  const gameWon=live.length===0;
+  const gameStuck=!gameWon&&!free.some(a=>free.some(b=>b.id!==a.id&&b.t===a.t));
+  const score=Math.max(0,pts.pairs*20+pts.chains*10-pts.penalty);
+  const secs=Math.floor(elapsed()/1000);
+
+  const flash=text=>{setMsg(text);clearTimeout(tmr.current);tmr.current=setTimeout(()=>setMsg(''),1800);};
+
+  useEffect(()=>{
+    if(!gameWon||result)return;
+    halt();
+    const s=Math.round(elapsed()/1000);
+    const timeBonus=Math.max(0,B.par-s)*2;
+    const total=Math.max(0,pts.pairs*20+pts.chains*10+timeBonus-pts.penalty);
+    const entry={id:Date.now(),score:total,time:s,date:today()};
+    setResult({secs:s,timeBonus,total,entry,qual:qualifies(lb[B.id]||[],entry)});
+  },[gameWon]);
+
+  const click=id=>{
+    if(paused||gameWon||!isFree(id))return;
+    if(!started.current){started.current=true;run();}
     setHint(null);
-    if(sel===null){setSel(tile.id);return;}
-    if(sel===tile.id){setSel(null);return;}
-    const s=tiles.find(t=>t.id===sel);
-    if(s?.t===tile.t){
-      setTiles(p=>p.map(t=>t.id===tile.id||t.id===sel?{...t,gone:true}:t));
-      setScore(sc=>sc+20);setSel(null);flash('⚛ ANNIHILATION! +20');
-    }else{setSel(tile.id);flash('✕ NO MATCH');}
-  },[tiles,sel,flash]);
+    if(sel===null){setSel(id);return;}
+    if(sel===id){setSel(null);return;}
+    if(tiles[sel].t===tiles[id].t){
+      const now=elapsed(),chain=lastMatch.current!=null&&now-lastMatch.current<=4000;
+      lastMatch.current=now;
+      setTiles(p=>p.map(t=>t.id===id||t.id===sel?{...t,gone:true}:t));
+      setPts(p=>({...p,pairs:p.pairs+1,chains:p.chains+(chain?1:0)}));
+      setSel(null);
+      flash(chain?'⚡ CHAIN REACTION! +30':'⚛ ANNIHILATION! +20');
+    }else{setSel(id);flash('✕ NO MATCH');}
+  };
   const doHint=()=>{
     for(let i=0;i<free.length;i++)for(let j=i+1;j<free.length;j++)
-      if(free[i].t===free[j].t){setHint([free[i].id,free[j].id]);setScore(s=>Math.max(0,s-5));return;}
+      if(free[i].t===free[j].t){setHint([free[i].id,free[j].id]);setPts(p=>({...p,penalty:p.penalty+5}));return;}
   };
   const doReshuffle=()=>{
-    const rem=tiles.filter(t=>!t.gone);const st=rng(rem.map(t=>t.t));let i=0;
-    setTiles(p=>p.map(t=>t.gone?t:{...t,t:st[i++]}));
-    setSel(null);setHint(null);setScore(s=>Math.max(0,s-20));flash('⚡ RESHUFFLED −20');
+    const ids=live.map(t=>t.id),counts={};
+    live.forEach(t=>{counts[t.t]=(counts[t.t]||0)+1;});
+    const pairTypes=Object.keys(counts).flatMap(k=>Array(counts[k]/2).fill(+k));
+    let t=dealPairs(B,ids,pairTypes);
+    if(!t){const flat=shuffle(live.map(x=>x.t));t={};ids.forEach((id,i)=>{t[id]=flat[i];});}
+    setTiles(p=>p.map(x=>x.gone?x:{...x,t:t[x.id]}));
+    setSel(null);setHint(null);setPts(p=>({...p,penalty:p.penalty+20}));flash('⚡ RESHUFFLED −20');
   };
-  const doRestart=()=>{setTiles(mkTiles());setSel(null);setScore(0);setHint(null);setMsg('');};
-  const stars=useRef([...Array(90)].map(()=>({
-    x:Math.random()*100,y:Math.random()*100,s:Math.random()*1.4+0.4,o:Math.random()*0.45+0.15
-  })));
-  const F={fontFamily:'"Courier New",monospace'};
-  return(
-    <div style={{...F,minHeight:'100vh',background:'#020510',display:'flex',flexDirection:'column',alignItems:'center',padding:'14px 8px',userSelect:'none',position:'relative',overflow:'hidden'}}>
-      <div style={{position:'fixed',inset:0,pointerEvents:'none',zIndex:999,backgroundImage:'repeating-linear-gradient(0deg,rgba(0,0,0,0.05),rgba(0,0,0,0.05) 1px,transparent 1px,transparent 3px)'}}/>
-      <div style={{position:'fixed',inset:0,pointerEvents:'none'}}>
-        {stars.current.map((s,i)=>(
-          <div key={i} style={{position:'absolute',left:`${s.x}%`,top:`${s.y}%`,width:s.s,height:s.s,borderRadius:'50%',background:'#fff',opacity:s.o}}/>
-        ))}
-      </div>
-      <div style={{position:'relative',color:'#00FFAA',fontSize:20,letterSpacing:6,textShadow:'0 0 18px #00FFAA88',marginBottom:2}}>
-        ⚛ PARTICLE MAHJONG
-      </div>
-      <div style={{position:'relative',color:'#1a4a2a',fontSize:9,letterSpacing:3,marginBottom:12}}>
-        MATCH PARTICLE PAIRS · CLEAR THE BOARD
-      </div>
-      <div style={{position:'relative',display:'flex',gap:24,color:'#4a6a5a',fontSize:11,letterSpacing:2,marginBottom:8}}>
-        <span>SCORE: <b style={{color:'#FFE066'}}>{score}</b></span>
-        <span>PAIRS: <b style={{color:'#81C784'}}>{matched}</b><span style={{color:'#1a4a2a'}}>/30</span></span>
-        <span>FREE: <b style={{color:'#4FC3F7'}}>{free.length}</b></span>
-      </div>
-      <div style={{position:'relative',height:20,fontSize:11,letterSpacing:2,marginBottom:8,
-        color:gameWon?'#FFE066':gameStuck?'#FF6B6B':'#66AA88',
-        textShadow:gameWon?'0 0 10px #FFE066':'none',
-        opacity:(gameWon||gameStuck||msg)?1:0,transition:'opacity 0.3s',
-      }}>
-        {gameWon?'✨ QUANTUM VICTORY — ALL PARTICLES ANNIHILATED':gameStuck?'💥 NO FREE PAIRS — RESHUFFLE OR RESTART':msg}
-      </div>
-      <div style={{width:WB*scale,height:HB*scale,marginBottom:14,flexShrink:0}}>
-        <div style={{position:'relative',width:WB,height:HB,transform:`scale(${scale})`,transformOrigin:'0 0'}}>
-          {tiles.filter(t=>!t.gone)
-            .sort((a,b)=>a.z!==b.z?a.z-b.z:a.y!==b.y?a.y-b.y:a.x-b.x)
-            .map(tile=>{
-              const tp=TYPES[tile.t];
-              const fr=isFree(tile,tiles);
-              const isSel=tile.id===sel;
-              const isHint=hint?.includes(tile.id);
-              const sx=tile.x*(TW+GAP)+tile.z*LDX;
-              const sy=tile.y*(TH+GAP)-tile.z*LDY+MZ*LDY;
-              const zi=tile.z*200+tile.y*10+(8-tile.x);
-              return(
-                <div key={tile.id} onClick={()=>click(tile)} style={{
-                  position:'absolute',left:sx,top:sy,width:TW,height:TH,
-                  zIndex:zi,cursor:fr?'pointer':'default',
-                  transform:isSel?'translateY(-6px)':'none',transition:'transform 0.08s',
-                }}>
-                  <div style={{
-                    position:'absolute',inset:0,borderRadius:2,
-                    background:fr?'linear-gradient(150deg,#1e1e40 0%,#0d0d24 100%)':'#070718',
-                    border:isSel?`2px solid ${tp.col}`:isHint?'2px solid #FFE066':fr?`1px solid ${tp.col}44`:'1px solid #0d0d22',
-                    boxShadow:isSel
-                      ?`0 0 14px ${tp.col},0 0 28px ${tp.col}44,5px 5px 0 #01010a`
-                      :isHint
-                      ?`0 0 14px #FFE066,0 0 28px #FFE06644,5px 5px 0 #01010a`
-                      :fr
-                      ?`0 0 3px ${tp.col}22,5px 5px 0 #01010a`
-                      :'4px 4px 0 #01010a',
-                    display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
-                  }}>
-                    {CORNERS.map((c,i)=>(
-                      <div key={i} style={{position:'absolute',...c,width:4,height:4,background:tp.col,opacity:fr?0.65:0.1}}/>
-                    ))}
-                    <div style={{position:'absolute',top:11,left:7,right:7,height:1,background:tp.col,opacity:fr?0.18:0.04}}/>
-                    <div style={{position:'absolute',bottom:11,left:7,right:7,height:1,background:tp.col,opacity:fr?0.18:0.04}}/>
-                    <div style={{fontSize:20,fontWeight:900,lineHeight:1,
-                      color:fr?tp.col:`${tp.col}2a`,
-                      textShadow:fr?`0 0 10px ${tp.col},0 0 20px ${tp.col}66`:'none',
-                    }}>{tp.sym}</div>
-                    <div style={{fontSize:6,marginTop:5,letterSpacing:0.5,textTransform:'uppercase',
-                      color:fr?`${tp.col}80`:`${tp.col}1a`,
-                    }}>{tp.name}</div>
-                  </div>
-                </div>
-              );
-            })}
-        </div>
-      </div>
-      <div style={{position:'relative',display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center'}}>
-        {[
-          {l:'HINT (−5)',fn:doHint,c:'#4FC3F7',d:gameWon||gameStuck||free.length<2},
-          {l:'RESHUFFLE (−20)',fn:doReshuffle,c:'#FFAB91',d:gameWon},
-          {l:'NEW GAME',fn:doRestart,c:'#FF6B6B',d:false},
-        ].map(b=>(
-          <button key={b.l} onClick={b.fn} disabled={b.d} style={{
-            fontFamily:'"Courier New",monospace',background:'transparent',
-            border:`1px solid ${b.d?'#181820':b.c}`,color:b.d?'#222':b.c,
-            fontSize:9,letterSpacing:1,padding:'7px 11px',cursor:b.d?'default':'pointer',
-            textShadow:b.d?'none':`0 0 8px ${b.c}44`,
-          }}>{b.l}</button>
-        ))}
-      </div>
-      <div style={{position:'relative',marginTop:16,display:'flex',flexWrap:'wrap',gap:'5px 14px',justifyContent:'center',maxWidth:480,opacity:0.4}}>
-        {TYPES.map((t,i)=>(
-          <span key={i} style={{fontFamily:'"Courier New",monospace',color:t.col,fontSize:9,letterSpacing:1}}>
-            {t.sym} <span style={{color:'#1a4a2a'}}>{t.name}</span>
-          </span>
-        ))}
-      </div>
+  const togglePause=()=>{
+    if(paused){setPaused(false);if(started.current)run();}
+    else{halt();setPaused(true);}
+  };
+  const leave=fn=>()=>{if(started.current&&!gameWon&&!confirm('Abandon this game?'))return;fn();};
+  const submitName=name=>{onSaveScore(B.id,{...result.entry,name});setSavedId(result.entry.id);};
+
+  const stat=(label,value,color)=><span>{label} <b style={{color}}>{value}</b></span>;
+  const shown=gameWon||gameStuck||msg;
+  return <div style={{width:'100%',display:'flex',flexDirection:'column',alignItems:'center'}}>
+    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',maxWidth:520,marginBottom:8}}>
+      <Btn label="◄ MENU" onClick={leave(onMenu)}/>
+      <span style={{color:C.green,fontSize:13,letterSpacing:3}}>{B.name}</span>
+      <Btn label={paused?'► RESUME':'❚❚ PAUSE'} onClick={togglePause} color={C.blue} disabled={gameWon}/>
     </div>
-  );
+    <div style={{display:'flex',flexWrap:'wrap',justifyContent:'center',gap:'4px 18px',color:C.label,fontSize:12,letterSpacing:1.5,marginBottom:6}}>
+      {stat('SCORE',score,C.yellow)}
+      {stat('TIME',fmtTime(secs),secs>B.par?C.red:C.green)}
+      {stat('PAIRS',`${pts.pairs}/${B.pairs}`,'#81C784')}
+      {stat('FREE',free.length,C.blue)}
+    </div>
+    <div style={{height:20,fontSize:12,letterSpacing:2,marginBottom:6,color:gameStuck?C.red:'#9fe8c4',opacity:shown?1:0,transition:'opacity 0.3s'}}>
+      {gameWon?'✨ QUANTUM VICTORY':gameStuck?'💥 NO FREE PAIRS — RESHUFFLE':msg}
+    </div>
+
+    <div style={{position:'relative',width:B.W*scale,height:B.H*scale,marginBottom:14,flexShrink:0}}>
+      <div style={{position:'relative',width:B.W,height:B.H,transform:`scale(${scale})`,transformOrigin:'0 0',
+        filter:paused?'blur(10px) brightness(0.4)':'none'}}>
+        {drawOrder(B,live.map(t=>t.id)).map(id=>
+          <Tile key={id} B={B} tile={tiles[id]} free={isFree(id)} sel={id===sel} hint={hint&&hint.includes(id)} onClick={()=>click(id)}/>)}
+      </div>
+      {paused&&<div style={{position:'absolute',inset:0,display:'grid',placeItems:'center',zIndex:999999}}>
+        <div style={{textAlign:'center'}}>
+          <div style={{color:C.blue,fontSize:22,letterSpacing:6,marginBottom:12,textShadow:`0 0 14px ${C.blue}`}}>❚❚ PAUSED</div>
+          <Btn label="► RESUME" onClick={togglePause} color={C.blue} big/>
+        </div>
+      </div>}
+    </div>
+
+    <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center'}}>
+      <Btn label="HINT (−5)" onClick={doHint} color={C.blue} disabled={paused||gameWon||gameStuck||free.length<2}/>
+      <Btn label="RESHUFFLE (−20)" onClick={doReshuffle} color="#FFAB91" disabled={paused||gameWon}/>
+      <Btn label="NEW GAME" onClick={leave(onRestart)} color={C.red}/>
+    </div>
+    <div style={{marginTop:14,display:'flex',flexWrap:'wrap',gap:'5px 14px',justifyContent:'center',maxWidth:480}}>
+      {TYPES.map((t,i)=><span key={i} style={{color:t.col,fontSize:11,letterSpacing:1}}>
+        {t.sym} <span style={{color:C.dim}}>{t.name}</span></span>)}
+    </div>
+
+    {result&&<div style={{position:'fixed',inset:0,zIndex:1000000,background:'rgba(2,5,16,0.88)',display:'grid',placeItems:'center',padding:16,overflowY:'auto'}}>
+      <div style={{width:'100%',maxWidth:380,border:`1.5px solid ${C.green}`,background:'#050d1a',padding:'20px 16px',
+        boxShadow:`0 0 30px ${C.green}33`,display:'flex',flexDirection:'column',alignItems:'center',gap:14}}>
+        <div style={{color:C.yellow,fontSize:16,letterSpacing:3,textAlign:'center',textShadow:`0 0 14px ${C.yellow}`}}>✨ QUANTUM VICTORY ✨</div>
+        <div style={{width:'100%',fontSize:13,letterSpacing:1,color:C.label}}>
+          {[[`PAIRS ${pts.pairs} × 20`,pts.pairs*20],[`CHAINS ${pts.chains} × 10`,pts.chains*10],
+            [`TIME ${fmtTime(result.secs)} (PAR ${fmtTime(B.par)})`,result.timeBonus],['PENALTIES',-pts.penalty]].map(([l,v])=>
+            <div key={l} style={{display:'flex',justifyContent:'space-between',padding:'3px 0'}}><span>{l}</span><b style={{color:v<0?C.red:'#fff'}}>{v>0?'+':''}{v}</b></div>)}
+          <div style={{display:'flex',justifyContent:'space-between',borderTop:'1px solid #1f4a5a',marginTop:6,paddingTop:8,fontSize:16}}>
+            <span style={{color:C.green}}>TOTAL</span><b style={{color:C.yellow}}>{result.total}</b></div>
+        </div>
+        {result.qual&&!savedId
+          ?<NameEntry onDone={submitName}/>
+          :<>
+            <div style={{color:C.label,fontSize:12,letterSpacing:3}}>{B.name} · TOP 3</div>
+            <Leaderboard list={lb[B.id]} highlight={savedId}/>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center'}}>
+              <Btn label="PLAY AGAIN" onClick={onRestart} color={C.yellow}/>
+              <Btn label="ALL SCORES" onClick={onScores} color={C.blue}/>
+              <Btn label="◄ MENU" onClick={onMenu}/>
+            </div>
+          </>}
+      </div>
+    </div>}
+  </div>;
+}
+
+/* ---------- App shell ---------- */
+function App(){
+  const [screen,setScreen]=useState('menu');
+  const [layout,setLayout]=useState('pyramid');
+  const [gameKey,setGameKey]=useState(0);
+  const [lb,setLb]=useState(loadLB);
+  const [highlight,setHighlight]=useState(null);
+  const stars=useRef([...Array(90)].map(()=>({x:Math.random()*100,y:Math.random()*100,s:Math.random()*1.4+0.4,o:Math.random()*0.45+0.15})));
+  const play=id=>{setLayout(id);setGameKey(k=>k+1);setScreen('game');scrollTo(0,0);};
+  const saveScore=(id,entry)=>{
+    setLb(prev=>{const next={...prev,[id]:[...(prev[id]||[]),entry].sort(rankOrder).slice(0,3)};saveLB(next);return next;});
+    setHighlight(entry.id);
+  };
+  return <div style={{minHeight:'100vh',background:C.bg,display:'flex',flexDirection:'column',alignItems:'center',padding:'14px 8px',userSelect:'none',position:'relative',overflow:'hidden'}}>
+    <div style={{position:'fixed',inset:0,pointerEvents:'none',zIndex:2000000,backgroundImage:'repeating-linear-gradient(0deg,rgba(0,0,0,0.05),rgba(0,0,0,0.05) 1px,transparent 1px,transparent 3px)'}}/>
+    <div style={{position:'fixed',inset:0,pointerEvents:'none'}}>
+      {stars.current.map((s,i)=><div key={i} style={{position:'absolute',left:`${s.x}%`,top:`${s.y}%`,width:s.s,height:s.s,borderRadius:'50%',background:'#fff',opacity:s.o}}/>)}
+    </div>
+    <div style={{position:'relative',width:'100%',display:'flex',flexDirection:'column',alignItems:'center',flex:1}}>
+      <div style={{color:C.green,fontSize:20,letterSpacing:6,textShadow:`0 0 18px ${C.green}88`,marginBottom:2,textAlign:'center'}}>⚛ PARTICLE MAHJONG</div>
+      <div style={{color:C.sub,fontSize:10,letterSpacing:3,marginBottom:12,textAlign:'center'}}>MATCH PARTICLE PAIRS · CLEAR THE BOARD</div>
+      {screen==='menu'&&<Menu lb={lb} onPlay={play} onScores={()=>{setHighlight(null);setScreen('scores');}}/>}
+      {screen==='scores'&&<Scores lb={lb} highlight={highlight} onBack={()=>setScreen('menu')}/>}
+      {screen==='game'&&<Game key={gameKey} B={boardById(layout)} lb={lb} onSaveScore={saveScore}
+        onMenu={()=>setScreen('menu')} onScores={()=>setScreen('scores')} onRestart={()=>play(layout)}/>}
+      <div style={{marginTop:'auto',paddingTop:24,color:C.dim,fontSize:11,letterSpacing:2}}>made by gionzana</div>
+    </div>
+  </div>;
 }
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
