@@ -2,7 +2,7 @@
   "name": "Particle Mahjong",
   "short_name": "Mahjong",
   "description": "Mahjong solitaire with particle physics tiles.",
-  "id": "./",
+  "id": "/particle-mahjong/",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
