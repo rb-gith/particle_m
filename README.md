@@ -2,7 +2,8 @@
 
 A retro-styled Mahjong Solitaire game where tiles are decorated with **particle physics symbols** instead of traditional Chinese characters. Dark space aesthetic, neon glows, scanline effect, and a starfield background.
 
-- **5 layouts** to choose from, from a quick warm-up to a long game
+- **6 layouts** to choose from, from a quick warm-up to a long game, including a heart
+- **A particle fact after every win**: 15 real physics facts, each with its source
 - **Every deal can be cleared**: boards are dealt so at least one solution always exists
 - **Timer and time-based scoring** with chain bonuses
 - **Arcade-style high scores**: enter your 3 initials for the top 3 of each layout
@@ -111,9 +112,23 @@ Library versions are pinned in both `index.html` and `sw.js`; change them in bot
 | Bridge | 58 | 4 | 3:52 |
 | Atom | 64 | 4 | 4:16 |
 | Fortress | 84 | 4 | 5:36 |
+| Heart (strong force) | 62 | 4 | 4:08 |
 
 Layouts are defined in `LAYOUTS` in `index.html` as `[x, y, z]` positions in half-tile units (a tile covers 2 × 2 units), so tiles can sit half a tile off the grid like classic Mahjong boards. To add one, append an entry with an even number of positions.
+
+## Particle facts
+
+After each win, the win screen shows one random fact (never the same one twice in a row) with its source as plain text. They're in `FACTS` in `index.html`. Each fact was checked against its source page:
+
+| Source | Pages used |
+|--------|------------|
+| CERN | [Higgs boson](https://home.cern/science/physics/higgs-boson), [Standard Model](https://home.cern/science/physics/standard-model), [Birth of the Web](https://home.cern/science/computing/the-birth-of-the-web), [Short history of the Web](https://home.cern/science/computing/the-birth-of-the-web/short-history-web), [Z boson](https://home.cern/science/physics/z-boson), [Higgs and everyday life](https://home.cern/science/physics/higgs-boson/why), [First PET image](https://kt.cern/forty-years-since-the-first-pet-image-at-cern), [Cosmic rays](https://home.cern/science/physics/cosmic-rays-particles-outer-space) |
+| Fermilab | [Why study neutrinos](https://minerva.fnal.gov/why-study-neutrinos/), [Top quark anniversary](https://news.fnal.gov/2020/03/twenty-fifth-anniversary-of-the-discovery-of-the-top-quark-at-fermilab/) |
+| NobelPrize.org | [J.J. Thomson](https://www.nobelprize.org/prizes/physics/1906/thomson/facts/), [Physics 2013](https://www.nobelprize.org/prizes/physics/2013/press-release/) |
+| US Department of Energy | [5 radioactive products we use every day](https://www.energy.gov/ne/articles/5-radioactive-products-we-use-every-day) |
 
 ## Credits
 
 Made by gionzana. If you enjoy the game, you can [buy me a coffee](https://buymeacoffee.com/gionzana) ☕
+
+Find more apps by me on [github](https://github.com/rb-gith?tab=repositories).

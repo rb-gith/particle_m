@@ -49,6 +49,7 @@ const TYPES=[
    Positions are [x, y, z] in half-tile units: a tile covers 2×2 units, so an
    odd coordinate sits half a tile off the grid (like classic Mahjong boards). */
 const rect=(x0,y0,cols,rows,z)=>{const p=[];for(let j=0;j<rows;j++)for(let i=0;i<cols;i++)p.push([x0+2*i,y0+2*j,z]);return p;};
+const row=(y,xs,z)=>xs.map(x=>[x,y,z]);
 const LAYOUTS=[
   {id:'flat',name:'FLAT',desc:'QUICK WARM-UP',pos:[...rect(0,0,6,4,0),...rect(2,1,4,3,1)]},
   {id:'pyramid',name:'PYRAMID',desc:'THE ORIGINAL',pos:[...rect(0,0,8,4,0),...rect(2,0,6,3,1),...rect(4,0,4,2,2),...rect(6,0,2,1,3)]},
@@ -64,7 +65,41 @@ const LAYOUTS=[
     ...rect(0,0,10,1,0),...rect(4,2,6,1,0),...rect(2,4,8,1,0),...rect(0,6,10,1,0),
     ...rect(2,8,8,1,0),...rect(4,10,6,1,0),...rect(0,12,10,1,0),
     ...rect(6,3,4,4,1),...rect(8,4,2,3,2),...rect(8,5,2,2,3)]},
+  {id:'heart',name:'HEART',desc:'STRONG FORCE',pos:[
+    ...row(0,[2,4,10,12],0),...row(2,[1,3,5,9,11,13],0),...rect(0,4,8,1,0),...rect(1,6,7,1,0),
+    ...rect(3,8,5,1,0),...rect(5,10,3,1,0),[7,12,0],
+    ...row(2,[2,4,10,12],1),...rect(2,4,6,1,1),...rect(3,6,5,1,1),...rect(5,8,3,1,1),[7,10,1],
+    ...row(4,[3,5,9,11],2),...rect(5,6,3,1,2),[7,8,2],
+    [7,6,3]]},
 ];
+
+/* ---------- Particle facts (one is shown after each win) ----------
+   Every fact was checked against its source page on 2026-11-10. Keep `src` short: it is shown as plain text. */
+const FACTS=[
+  {text:'About 100 trillion neutrinos pass through your body every second, and you never notice them.',src:'Fermilab'},
+  {text:'The top quark is the heaviest known elementary particle. A single one is as heavy as a whole gold atom.',src:'Fermilab'},
+  {text:'Particles have no mass of their own. They get it by interacting with the Higgs field, which fills the whole universe.',src:'CERN'},
+  {text:'The Higgs boson is the only fundamental particle with a spin of zero.',src:'CERN'},
+  {text:'Quarks are held together by gluons, carriers of the strong force. They only combine into “colourless” particles, like protons.',src:'CERN'},
+  {text:'In 1897, J.J. Thomson showed that cathode rays are made of tiny particles: electrons.',src:'NobelPrize.org'},
+  {text:'The World Wide Web was invented at CERN by Tim Berners-Lee in 1989. The first website ran on his NeXT computer.',src:'CERN'},
+  {text:'On 30 April 1993, CERN made the web’s software free for anyone to use.',src:'CERN'},
+  {text:'The W and Z bosons were discovered at CERN in 1983. The discovery won the Nobel Prize just a year later.',src:'CERN'},
+  {text:'Englert and Higgs predicted the Higgs mechanism in 1964. It was confirmed at CERN in 2012, and they won the Nobel Prize in 2013.',src:'NobelPrize.org'},
+  {text:'Bananas are slightly radioactive, because they contain potassium-40.',src:'US Department of Energy'},
+  {text:'Many household smoke detectors contain a tiny amount of radioactive americium-241.',src:'US Department of Energy'},
+  {text:'In the early 1970s, CERN engineers helped advance touchscreen technology while building a simple way to control an accelerator.',src:'CERN'},
+  {text:'PET scans in hospitals use antimatter. In 1977, CERN physicists made one of the first PET images, of a mouse.',src:'CERN'},
+  {text:'Muons made by cosmic rays reach the ground all the time. About one per second passes through a space the size of your head.',src:'CERN'},
+];
+/* Pick a random fact, never the same one twice in a row on this device. */
+const pickFact=()=>{
+  let last=-1;try{const v=localStorage.getItem('pm-last-fact');if(v!==null)last=+v;}catch(e){}
+  let i=0|Math.random()*FACTS.length;
+  if(FACTS.length>1&&i===last)i=(i+1+(0|Math.random()*(FACTS.length-1)))%FACTS.length;
+  try{localStorage.setItem('pm-last-fact',i);}catch(e){}
+  return i;
+};
 const SEC_PER_PAIR=8; // par time; finishing faster earns a time bonus
 
 /* Precompute, for every position, which positions cover it and which touch its left/right side. */
@@ -299,7 +334,7 @@ function Game({B,lb,onSaveScore,onMenu,onScores,onRestart}){
     const timeBonus=Math.max(0,B.par-s)*2;
     const total=Math.max(0,pts.pairs*20+pts.chains*10+timeBonus-pts.penalty);
     const entry={id:Date.now(),score:total,time:s,date:today()};
-    setResult({secs:s,timeBonus,total,entry,qual:qualifies(lb[B.id]||[],entry)});
+    setResult({secs:s,timeBonus,total,entry,qual:qualifies(lb[B.id]||[],entry),fact:pickFact()});
   },[gameWon]);
 
   const click=id=>{
@@ -390,6 +425,12 @@ function Game({B,lb,onSaveScore,onMenu,onScores,onRestart}){
           <div style={{display:'flex',justifyContent:'space-between',borderTop:'1px solid #1f4a5a',marginTop:6,paddingTop:8,fontSize:16}}>
             <span style={{color:C.green}}>TOTAL</span><b style={{color:C.yellow}}>{result.total}</b></div>
         </div>
+        <div style={{width:'100%',borderLeft:`2px solid ${C.yellow}`,padding:'4px 0 4px 10px'}}>
+          <div style={{color:C.yellow,fontSize:11,letterSpacing:2,marginBottom:5}}>
+            ⚛ PARTICLE FACT {String(result.fact+1).padStart(2,'0')}/{FACTS.length}</div>
+          <div style={{color:'#cfe8dc',fontSize:13,lineHeight:1.5}}>{FACTS[result.fact].text}</div>
+          <div style={{color:C.dim,fontSize:11,marginTop:5}}>Source: {FACTS[result.fact].src}</div>
+        </div>
         {result.qual&&!savedId
           ?<NameEntry onDone={submitName}/>
           :<>
@@ -434,6 +475,8 @@ function App(){
       <div style={{marginTop:'auto',paddingTop:24,display:'flex',flexDirection:'column',alignItems:'center',gap:10,fontSize:11,letterSpacing:2}}>
         <a href="https://buymeacoffee.com/gionzana" target="_blank" rel="noopener" style={{color:C.yellow,textDecoration:'none',
           border:`1.5px solid ${C.yellow}`,padding:'7px 12px',textShadow:`0 0 8px ${C.yellow}66`,boxShadow:`inset 0 0 10px ${C.yellow}22`}}>☕ BUY ME A COFFEE</a>
+        <span style={{color:C.label}}>find more apps by me on <a href="https://github.com/rb-gith?tab=repositories" target="_blank" rel="noopener"
+          style={{color:C.blue}}>github</a></span>
         <span style={{color:C.dim}}>made by gionzana</span>
       </div>
     </div>
